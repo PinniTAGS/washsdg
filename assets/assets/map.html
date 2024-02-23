@@ -1,0 +1,279 @@
+"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shapefile Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"/>
+
+    <style>
+        .scrollable-content {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .leaflet-control {
+            display: inline-block;
+        }
+
+
+        #resetButton i, #inspectButton i {
+            font-size: 18px;
+            line-height: 26px;
+        }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        #map.inspect-mode {
+            cursor: url('analyze.png'), auto;
+        }
+
+        .loader {
+            border: 16px solid #f3f3f3; /* Light grey */
+            border-top: 16px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="loader"
+     style="display: none; position: fixed; z-index: 999; height: 2em; width: 2em; overflow: show; margin: auto; top: 0; left: 0; bottom: 0; right: 0;">
+    <div class="loader"></div>
+</div>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs/dist/shp.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.5.0/jszip.min.js"></script>
+<script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
+
+<script>
+    // Initialize the map
+    var map = L.map('map').setView([1.3733, 32.2903], 7);
+
+    // Define your layers
+    var noneLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=t&x={x}&y={y}&z={z}');
+    var streetMapsLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    var satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}');
+    var hybridLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}');
+    var terrainLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}');
+    var roadMapLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}');
+
+    // Add them to a layer group
+    var baseLayers = {
+        "None": noneLayer,
+        "Street Maps": streetMapsLayer,
+        "Satellite": satelliteLayer,
+        "Hybrid": hybridLayer,
+        "Terrain": terrainLayer,
+        "Road Map": roadMapLayer
+    };
+
+    // Add the layer control to the map
+    L.control.layers(baseLayers).addTo(map);
+
+    // Add a tile layer to the map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+    }).addTo(map);
+
+    // Global variable to keep track of the shapefile layers
+    var shapefileLayers = {};
+
+    // Global variable to keep track of the shapefile cache
+    var shapefileCache = {};
+
+    // Add a reset button
+    var resetButton = L.control({position: 'topleft'});
+    resetButton.onAdd = function (map) {
+        var div = L.DomUtil.create('div', 'leaflet-control-zoom leaflet-bar leaflet-control');
+        div.innerHTML = '<a id="resetButton" class="leaflet-control-zoom-in" href="#" title="Reset"><i class="fas fa-redo"></i></a>';
+        return div;
+    };
+    resetButton.addTo(map);
+
+    // Add event listener to the reset button
+    document.getElementById('resetButton').addEventListener('click', function () {
+        map.setView([1.3733, 32.2903], 7);
+    });
+    var shapefileUrls = [${pageProvider.selectedDatasetUrl.map((e) => "'$e'").join(',')}];
+    // List of URLs containing the shapefiles
+    // var shapefileUrls = ["https://washsdg.azurewebsites.net/uploads/uganda_rivers.zip", "http://192.168.100.52:8052/uploads/project sites2.kmz"]
+
+    // Function to get color based on feature type
+    function getColor(feature) {
+        for (var property in feature.properties) {
+            var lowerCaseProperty = property.toLowerCase();
+            var lowerCaseValue = String(feature.properties[property]).toLowerCase();
+            if (lowerCaseProperty.includes('lake') || lowerCaseValue.includes('lake')) {
+                return 'blue';
+            } else if (lowerCaseProperty.includes('river') || lowerCaseValue.includes('river')) {
+                return 'aqua';
+            } else if (lowerCaseProperty.includes('city') || lowerCaseValue.includes('city')) {
+                return 'red';
+            } else if (lowerCaseProperty.includes('country') || lowerCaseValue.includes('country')) {
+                return 'green';
+            } else if (lowerCaseProperty.includes('mountain') || lowerCaseValue.includes('mountain') || lowerCaseProperty.includes('hill') || lowerCaseValue.includes('hill')) {
+                return 'brown';
+            } else if (lowerCaseProperty.includes('forest') || lowerCaseValue.includes('forest')) {
+                return 'darkgreen';
+            } else if (lowerCaseProperty.includes('desert') || lowerCaseValue.includes('desert')) {
+                return 'yellow';
+            } else if (lowerCaseProperty.includes('ocean') || lowerCaseValue.includes('ocean')) {
+                return 'navy';
+            } else if (lowerCaseProperty.includes('island') || lowerCaseValue.includes('island')) {
+                return 'orange';
+            } else if (lowerCaseProperty.includes('railway') || lowerCaseValue.includes('railway')) {
+                return 'purple';
+            } else if (lowerCaseProperty.includes('airport') || lowerCaseValue.includes('airport')) {
+                return 'pink';
+            } else if (lowerCaseProperty.includes('park') || lowerCaseValue.includes('park')) {
+                return 'lime';
+            } else if (lowerCaseProperty.includes('shop') || lowerCaseValue.includes('shop')) {
+                return 'silver';
+            }
+        }
+        return 'gray';
+    }
+
+
+    // Function to get marker based on feature type
+    function getMarker(feature, latlng) {
+        switch (feature.properties.type) {
+            case 'city': return L.circleMarker(latlng, {radius: 10, fillColor: getColor(feature), fillOpacity: 1});
+            case 'country': return L.marker(latlng);
+            case 'forest': return L.squareMarker(latlng, {size: 10, fillColor: getColor(feature), fillOpacity: 0.8});
+            case 'desert': return L.starMarker(latlng, {points: 5, radius: 10, innerRadius: 5, fillColor: getColor(feature), fillOpacity: 0.8});
+            case 'ocean': return L.waveMarker(latlng, {waves: 3, radius: 15, fillColor: getColor(feature), fillOpacity: 0.8});
+            case 'island': return L.polygonMarker(latlng, {sides: 6, radius: 10, rotation: 30, fillColor: getColor(feature), fillOpacity: 0.8});
+            case 'railway': return L.iconMarker(latlng, {iconUrl: 'railway.png', iconSize: [20, 20]});
+            case 'airport': return L.iconMarker(latlng, {iconUrl: 'airport.png', iconSize: [20, 20]});
+            case 'park': return L.ellipseMarker(latlng, {radiusX: 15, radiusY: 10, fillColor: getColor(feature), fillOpacity: 0.8});
+            case 'shop': return L.diamondMarker(latlng, {size: 10, fillColor: getColor(feature), fillOpacity: 0.8});
+            default: return L.circleMarker(latlng, {radius: 5, fillColor: getColor(feature), fillOpacity: 1});
+        }
+    }
+
+
+    // Function to load and parse a shapefile
+    // Initialize the counter
+    var loadingCount = 0;
+
+    // Function to load and parse a shapefile
+    // Function to load and parse a shapefile or KML file
+
+    // Function to load and parse a shapefile or KML/KMZ file
+    async function loadShapefile(url, index) {
+        // Increment the counter
+        loadingCount++;
+
+        // Show the loader if it's not already visible
+        if (loadingCount === 1) {
+            document.getElementById('loader').style.display = 'block';
+        }
+
+        // Check if the file is in the cache
+        if (shapefileCache[url]) {
+            // Use the cached file
+            var fileLayer = shapefileCache[url];
+        } else {
+            try {
+                // Check if the file is a KML or KMZ file
+                if (url.endsWith('.kml')) {
+                    // Load and parse the KML file
+                    fileLayer = omnivore.kml(url).addTo(map);
+                } else if (url.endsWith('.kmz')) {
+                    // Load and decompress the KMZ file
+                    const response = await fetch(url);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const zip = await JSZip.loadAsync(arrayBuffer);
+
+                    const kmlContent = await zip.file(/\.kml$/)[0].async("string");
+
+                    // Parse the KML content
+                    fileLayer = omnivore.kml.parse(kmlContent).addTo(map);
+                } else {
+                    // Load and parse the shapefile
+                    const geojson = await shp(url);
+
+                    // Create a GeoJSON layer from the parsed data
+                    fileLayer = L.geoJson(geojson, {
+                        style: function (feature) {
+                            return {color: getColor(feature)};
+                        },
+                        pointToLayer: getMarker,
+                        onEachFeature: function (feature, layer) {
+                            layer.bindPopup(Object.keys(feature.properties).map(function(k) {
+                                return k + ": " + feature.properties[k];
+                            }).join("<br />"), {maxHeight: 200});
+                        }
+                    });
+                }
+
+                // Add the file to the cache
+                shapefileCache[url] = fileLayer;
+            } catch (error) {
+                // Log any errors that occur
+                console.error('Error loading file:', error);
+            } finally {
+                // Decrement the counter
+                loadingCount--;
+
+                // Hide the loader if all files have finished loading
+                if (loadingCount === 0) {
+                    document.getElementById('loader').style.display = 'none';
+                }
+            }
+        }
+
+        // Add the file layer to the map
+        fileLayer.addTo(map);
+
+        // Add the file layer to the global variable
+        shapefileLayers['shapefile' + index] = fileLayer;
+    }
+    // Loop through each URL in the list
+    for (let index = 0; index < shapefileUrls.length; index++) {
+        const url = shapefileUrls[index];
+
+        // Check if the shapefile already exists
+        if (!shapefileLayers['shapefile' + index]) {
+            // Load the shapefile
+            loadShapefile(url, index);
+        }
+    }
+    // Function to remove a shapefile from the map
+    function removeShapefile(name) {
+        // Check if the shapefile exists in the global variable
+        if (shapefileLayers[name]) {
+            // Remove the shapefile layer from the map
+            map.removeLayer(shapefileLayers[name]);
+
+            // Remove the shapefile layer from the global variable
+            delete shapefileLayers[name];
+        }
+    }
+</script>
+</body>
+</html>
+"""
