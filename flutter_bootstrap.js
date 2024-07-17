@@ -21,7 +21,7 @@ const user_config = force_canvaskit ? {'renderer': 'canvaskit'} : {};
 _flutter.loader.load({
   config: user_config,
   serviceWorkerSettings: {
-    serviceWorkerVersion: "2710628267",
+    serviceWorkerVersion: "1187076430",
   },
   onEntrypointLoaded: async function(engine_initializer) {
     console.log('Flutter entrypoint loaded');
